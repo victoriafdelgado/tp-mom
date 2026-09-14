@@ -10,32 +10,51 @@ class MessageMiddlewareQueueRabbitMQ(MessageMiddlewareQueue):
         self.channel = self.connection.channel()
         self.channel.queue_declare(queue=queue_name, durable=True, arguments={'x-queue-type': 'quorum'})
         self.queue_name = queue_name
+    
+    def start_consuming(self, on_message_callback):
+        try:
+            def callback(ch, method, properties, body):
+                def ack():
+                    ch.basic_ack(delivery_tag=method.delivery_tag)
+                def nack():
+                    ch.basic_nack(delivery_tag=method.delivery_tag)
+                on_message_callback(body, ack, nack)
+
+            self.channel.basic_qos(prefetch_count=1)
+            self.channel.basic_consume(queue=self.queue_name,
+                                        on_message_callback=callback)
+            self.channel.start_consuming()
+        except pika.exceptions.AMQPConnectionError as e:
+            raise MessageMiddlewareDisconnectedError(e)
+        except pika.exceptions.AMQPError as e:
+            raise MessageMiddlewareMessageError(e)
+
+    def stop_consuming(self):
+        try:
+            self.channel.stop_consuming()
+        except pika.exceptions.AMQPConnectionError as e:
+            raise MessageMiddlewareDisconnectedError(e)
+
 
     def send(self, message):
-        self.channel.basic_publish(exchange='',
-                                routing_key=self.queue_name,
-                                body=message,
-                                properties=pika.BasicProperties(
-                                    delivery_mode = pika.DeliveryMode.Persistent
-                                ))
+        try:
+            self.channel.basic_publish(exchange='',
+                                    routing_key=self.queue_name,
+                                    body=message,
+                                    properties=pika.BasicProperties(
+                                        delivery_mode = pika.DeliveryMode.Persistent
+                                    ))
+        except pika.exceptions.AMQPConnectionError as e:
+            raise MessageMiddlewareDisconnectedError(e)
+        except pika.exceptions.AMQPError as e:
+            raise MessageMiddlewareMessageError(e)
+
+
     def close(self):
-        self.connection.close()
-    
-    def stop_consuming(self):
-        self.channel.stop_consuming()
-
-    def start_consuming(self, on_message_callback):
-        def callback(ch, method, properties, body):
-           def ack():
-               ch.basic_ack(delivery_tag=method.delivery_tag)
-           def nack():
-               ch.basic_nack(delivery_tag=method.delivery_tag)
-           on_message_callback(body, ack, nack)
-
-        self.channel.basic_qos(prefetch_count=1)
-        self.channel.basic_consume(queue=self.queue_name,
-                                   on_message_callback=callback)
-        self.channel.start_consuming()
+        try:
+            self.connection.close()
+        except pika.exceptions.AMQPError as e:
+            raise MessageMiddlewareCloseError(e)
 
 
 class MessageMiddlewareExchangeRabbitMQ(MessageMiddlewareExchange):
@@ -54,25 +73,42 @@ class MessageMiddlewareExchangeRabbitMQ(MessageMiddlewareExchange):
                                     routing_key=routing_key)
     
     def send(self, message):
-        for routing_key in self.routing_keys:
-            self.channel.basic_publish(exchange=self.exchange_name, 
-                                    routing_key=routing_key, 
-                                    body=message)
+        try:
+            for routing_key in self.routing_keys:
+                self.channel.basic_publish(exchange=self.exchange_name, 
+                                        routing_key=routing_key, 
+                                        body=message)
+        except pika.exceptions.AMQPConnectionError as e:
+            raise MessageMiddlewareDisconnectedError(e)
+        except pika.exceptions.AMQPError as e:
+            raise MessageMiddlewareMessageError(e)
 
     def close(self):
-        self.connection.close()
+        try:
+            self.connection.close()
+        except pika.exceptions.AMQPError as e:
+                raise MessageMiddlewareCloseError(e)
 
     def stop_consuming(self):
-        self.channel.stop_consuming()
+        try:
+            self.channel.stop_consuming()
+        except pika.exceptions.AMQPConnectionError as e:
+            raise MessageMiddlewareDisconnectedError(e)
+    
 
     def start_consuming(self, on_message_callback):
-        def callback(ch, method, properties, body):
-                def ack():
-                    ch.basic_ack(delivery_tag=method.delivery_tag)
-                def nack():
-                    ch.basic_nack(delivery_tag=method.delivery_tag)
-                on_message_callback(body, ack, nack)
+        try:
+            def callback(ch, method, properties, body):
+                    def ack():
+                        ch.basic_ack(delivery_tag=method.delivery_tag)
+                    def nack():
+                        ch.basic_nack(delivery_tag=method.delivery_tag)
+                    on_message_callback(body, ack, nack)
 
-        self.channel.basic_consume(queue=self.queue_name, on_message_callback=callback)
-        self.channel.start_consuming()
-    
+            self.channel.basic_consume(queue=self.queue_name, on_message_callback=callback)
+            self.channel.start_consuming()
+        except pika.exceptions.AMQPConnectionError as e:
+            raise MessageMiddlewareDisconnectedError(e)
+        except pika.exceptions.AMQPError as e:
+            raise MessageMiddlewareMessageError(e)
+        
