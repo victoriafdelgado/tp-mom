@@ -19,14 +19,25 @@ class _MessageMiddlewareRabbitMQ():
         return callback
 
     def _start_consuming(self, on_message_callback, queue_name):
-        callback = self._define_callback(on_message_callback)
-        self.channel.basic_qos(prefetch_count=1)
-        self.channel.basic_consume(queue=queue_name,
-                                    on_message_callback=callback)
-        self._is_consuming = True
-        self.channel.start_consuming()
+        if self._is_consuming:
+            raise MessageMiddlewareMessageError()
+        try:
+            callback = self._define_callback(on_message_callback)
+            self.channel.basic_qos(prefetch_count=1)
+            self.channel.basic_consume(queue=queue_name,
+                                        on_message_callback=callback)
+            self._is_consuming = True
+            self.channel.start_consuming()
+        except pika.exceptions.AMQPConnectionError as e:
+            raise MessageMiddlewareDisconnectedError(e)
+        except pika.exceptions.AMQPError as e:
+            raise MessageMiddlewareMessageError(e)
+        finally:
+            self._is_consuming = False
 
     def _stop_consuming(self):
+        if not self._is_consuming:
+            return
         try:
             self.channel.stop_consuming()
         except pika.exceptions.AMQPConnectionError as e:
