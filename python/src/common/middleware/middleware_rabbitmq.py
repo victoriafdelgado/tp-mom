@@ -53,9 +53,14 @@ class _MessageMiddlewareRabbitMQ():
 class MessageMiddlewareQueueRabbitMQ(MessageMiddlewareQueue):
 
     def __init__(self, host, queue_name):
-        self.connection =  pika.BlockingConnection(pika.ConnectionParameters(host))
-        self.channel = self.connection.channel()
-        self.channel.queue_declare(queue=queue_name, durable=True, arguments={'x-queue-type': 'quorum'})
+        try:
+            self.connection =  pika.BlockingConnection(pika.ConnectionParameters(host))
+            self.channel = self.connection.channel()
+            self.channel.queue_declare(queue=queue_name, durable=True)
+        except pika.exceptions.AMQPConnectionError as e:
+            raise MessageMiddlewareDisconnectedError(e)
+        except pika.exceptions.AMQPError as e:
+            raise MessageMiddlewareMessageError(e)
         self.queue_name = queue_name
         self._messagemwrabbit = _MessageMiddlewareRabbitMQ(self.channel, self.connection)
     
@@ -78,16 +83,20 @@ class MessageMiddlewareQueueRabbitMQ(MessageMiddlewareQueue):
         except pika.exceptions.AMQPError as e:
             raise MessageMiddlewareMessageError(e)
 
-
     def close(self):
         self._messagemwrabbit._close()
 
 class MessageMiddlewareExchangeRabbitMQ(MessageMiddlewareExchange):
     
     def __init__(self, host, exchange_name, routing_keys):
-        self.connection =  pika.BlockingConnection(pika.ConnectionParameters(host))
-        self.channel = self.connection.channel()
-        self.channel.exchange_declare(exchange=exchange_name, exchange_type='direct')
+        try:
+            self.connection =  pika.BlockingConnection(pika.ConnectionParameters(host))
+            self.channel = self.connection.channel()
+            self.channel.exchange_declare(exchange=exchange_name, exchange_type='direct', durable = True)
+        except pika.exceptions.AMQPConnectionError as e:
+            raise MessageMiddlewareDisconnectedError(e)
+        except pika.exceptions.AMQPError as e:
+            raise MessageMiddlewareMessageError(e)
         self.exchange_name = exchange_name
         self.routing_keys = routing_keys
         self._messagemwrabbit = _MessageMiddlewareRabbitMQ(self.channel, self.connection)
@@ -126,4 +135,3 @@ class MessageMiddlewareExchangeRabbitMQ(MessageMiddlewareExchange):
 
     def close(self):
         self._messagemwrabbit._close()
-
